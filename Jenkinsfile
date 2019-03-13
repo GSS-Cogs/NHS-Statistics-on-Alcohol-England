@@ -21,15 +21,41 @@ pipeline {
             }
             steps {
                 script {
-                    for (def file : findFiles(glob: '*.ipynb')) {
-                        sh "jupyter-nbconvert --output-dir=out --ExecutePreprocessor.timeout=None --execute '${file.name}'"
+                    ansiColor('xterm') {
+                        sh "jupyter-nbconvert --output-dir=out --ExecutePreprocessor.timeout=None --execute 'main.ipynb'"
                     }
                 }
             }
         }
-        stage('Review') {
+        stage('Test') {
+            agent {
+                docker {
+                    image 'cloudfluff/csvlint'
+                    reuseNode true
+                }
+            }
             steps {
-                error "Needs review"
+                script {
+                    ansiColor('xterm') {
+                        sh "csvlint -s schema.json"
+                    }
+                }
+            }
+        }
+        stage('Upload draftset') {
+            steps {
+                script {
+                    jobDraft.replace()
+                    uploadTidy(['out/observations.csv'],
+                               'https://github.com/ONS-OpenData/ref_alcohol/raw/master/columns.csv')
+                }
+            }
+        }
+        stage('Publish') {
+            steps {
+                script {
+                    jobDraft.publish()
+                }
             }
         }
     }
