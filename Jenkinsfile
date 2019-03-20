@@ -27,7 +27,7 @@ pipeline {
                 }
             }
         }
-        stage('Test') {
+        stage('Validate CSV') {
             agent {
                 docker {
                     image 'cloudfluff/csvlint'
@@ -37,17 +37,76 @@ pipeline {
             steps {
                 script {
                     ansiColor('xterm') {
-                        sh "csvlint -s schema.json"
+                        if (fileExists('schema.json')) {
+                            sh "csvlint -s schema.json"
+                        } else {
+                            def schemas = []
+                            for (def schema : findFiles(glob: 'out/*-schema.json')) {
+                                schemas.add("out/${schema.name}")
+                            }
+                            for (String schema : schemas) {
+                                sh "csvlint -s ${schema}"
+                            }
+                        }
                     }
                 }
             }
         }
-        stage('Upload draftset') {
+        stage('Upload Tidy Data') {
             steps {
                 script {
                     jobDraft.replace()
-                    uploadTidy(['out/observations.csv'],
-                               'https://github.com/ONS-OpenData/ref_alcohol/raw/master/columns.csv')
+                    if (fileExists('out/observations.csv')) {
+                        uploadTidy(['out/observations.csv'],
+                                   "https://ons-opendata.github.io/ref_alcohol/columns.csv")
+                    } else {
+                        def datasets = []
+                        String dspath = util.slugise(env.JOB_NAME)
+                        for (def observations : findFiles(glob: 'out/*.csv')) {
+                            dataset = [
+                                "csv": "out/${observations.name}",
+                                "metadata": "out/${observations.name}-metadata.trig",
+                                "path": "${dspath}/{observations.name.take(observations.name.lastIndexOf('.'))}"
+                            ]
+                            datasets.add(dataset)
+                        }
+                        for (def dataset : datasets) {
+                            uploadTidy([dataset.csv],
+                                       "https://ons-opendata.github.io/ref_alcohol/columns.csv",
+                                       dataset.path,
+                                       dataset.metadata)
+                        }
+                    }
+                }
+            }
+        }
+        stage('Test draft dataset') {
+            agent {
+                docker {
+                    image 'cloudfluff/gdp-sparql-tests'
+                    reuseNode true
+                }
+            }
+            steps {
+                script {
+                    pmd = pmdConfig("pmd")
+                    String draftId = pmd.drafter.findDraftset(env.JOB_NAME).id
+                    String endpoint = pmd.drafter.getDraftsetEndpoint(draftId)
+                    String dspath = util.slugise(env.JOB_NAME)
+                    def dsgraphs = []
+                    if (fileExists('out/observations.csv')) {
+                        dsgraphs.add("${pmd.config.base_uri}/graph/${dspath}")
+                    } else {
+                        for (def observations : findFiles(glob: 'out/*.csv')) {
+                            String basename = observations.name.take(observations.name.lastIndexOf('.'))
+                            dsgraphs.add("${pmd.config.base_uri}/graph/${dspath}/${basename}")
+                        }
+                    }
+                    withCredentials([usernamePassword(credentialsId: pmd.config.credentials, usernameVariable: 'USER', passwordVariable: 'PASS')]) {
+                        for (String dsgraph : dsgraphs) {
+                            sh "sparql-test-runner -t /usr/local/tests -s ${endpoint}?union-with-live=true -a '${USER}:${PASS}' -p \"dsgraph=<${dsgraph}>\""
+                        }
+                    }
                 }
             }
         }
@@ -62,12 +121,14 @@ pipeline {
     post {
         always {
             script {
-                archiveArtifacts 'out/*'
+                archiveArtifacts artifacts: 'out/*', excludes: 'out/*.html'
+                junit 'reports/**/*.xml'
+                publishHTML([
+                    allowMissing: true, alwaysLinkToLastBuild: true, keepAll: true,
+                    reportDir: 'out', reportFiles: 'main.html',
+                    reportName: 'Transform'])
                 updateCard '5b4f3c98336dc1d9d4346c17'
             }
-        }
-        success {
-            build job: '../GDP-tests', wait: false
         }
     }
 }
