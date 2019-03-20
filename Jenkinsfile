@@ -66,7 +66,7 @@ pipeline {
                             dataset = [
                                 "csv": "out/${observations.name}",
                                 "metadata": "out/${observations.name}-metadata.trig",
-                                "path": "${dspath}/{observations.name.take(observations.name.lastIndexOf('.'))}"
+                                "path": "${dspath}/${observations.name.take(observations.name.lastIndexOf('.'))}"
                             ]
                             datasets.add(dataset)
                         }
