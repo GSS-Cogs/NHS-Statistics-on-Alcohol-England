@@ -153,7 +153,7 @@ for (filename, table) in tables.items():
     display(HTML(f'<h2>{title}</h2>'))
     display(table)
     table.to_csv(out / f'{pathify(title)}.csv', index = False)
-    schema = CSVWSchema('https://ons-opendata.github.io/ref_alcohol/')
+    schema = CSVWMetadata('https://ons-opendata.github.io/ref_alcohol/')
     schema.create(out / f'{pathify(title)}.csv', out / f'{pathify(title)}.csv-schema.json')
 # -
 
